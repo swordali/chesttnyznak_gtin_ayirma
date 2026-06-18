@@ -3,12 +3,12 @@ from zipfile import ZipFile
 from collections import defaultdict
 import io
 
-st.title("GTIN TXT Ayırıcı")
+st.title("GS1 DataMatrix GTIN Ayırıcı")
 
-uploaded = st.file_uploader("TXT veya ZIP dosyanı yükle", type=["txt", "zip"])
+uploaded = st.file_uploader("TXT veya ZIP yükle", type=["txt", "zip"])
 
 gtins_text = st.text_area(
-    "GTIN numaraları",
+    "GTIN listesi",
     value="""04695660284417
 04695660284394
 04695660284301
@@ -24,23 +24,25 @@ if uploaded:
         with ZipFile(io.BytesIO(raw), "r") as z:
             txt_files = [n for n in z.namelist() if n.lower().endswith(".txt")]
             if not txt_files:
-                st.error("ZIP içinde TXT dosyası bulunamadı.")
+                st.error("ZIP içinde TXT bulunamadı.")
                 st.stop()
-            text = z.read(txt_files[0]).decode("utf-8", errors="ignore")
+            data = z.read(txt_files[0])   # BYTES olarak oku
     else:
-        text = raw.decode("utf-8", errors="ignore")
+        data = raw                         # BYTES olarak oku
 
     gtins = [g.strip() for g in gtins_text.splitlines() if g.strip()]
-    prefixes = ["01" + g for g in gtins]
+    prefixes = [("01" + g).encode("ascii") for g in gtins]
+
+    # Satırları bytes olarak böl, 0x1D karakterini korur
+    lines = [line.strip(b"\r\n") for line in data.splitlines() if line.strip(b"\r\n")]
 
     groups = defaultdict(list)
-    lines = [x.strip() for x in text.splitlines() if x.strip()]
 
     for line in lines:
         for prefix in prefixes:
             pos = line.find(prefix)
             if pos != -1:
-                groups[prefix].append(line[pos:])
+                groups[prefix].append(line[pos:])  # GS/FNC1 karakterleri korunur
                 break
 
     st.write("Toplam satır:", len(lines))
@@ -49,16 +51,20 @@ if uploaded:
 
     with ZipFile(output_zip, "w") as z:
         for prefix in prefixes:
-            filename = f"{prefix}.txt"
-            content = "\n".join(groups[prefix])
+            filename = prefix.decode("ascii") + ".txt"
+            content = b"\n".join(groups[prefix])
             if content:
-                content += "\n"
+                content += b"\n"
 
             z.writestr(filename, content)
+
             st.write(filename, "→", len(groups[prefix]), "kod")
 
+            if groups[prefix]:
+                st.code(groups[prefix][0].decode("utf-8", errors="replace"))
+
     st.download_button(
-        "Ayrılmış TXT dosyalarını ZIP olarak indir",
+        "ZIP indir",
         data=output_zip.getvalue(),
         file_name="gtin_ayrilmis.zip",
         mime="application/zip"
